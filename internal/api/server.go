@@ -1,16 +1,12 @@
 /*
 Package api реализует транспортный слой Hydro Engine.
-
 Использование go-chi в 2026 году — это золотая середина для стриминг-бойлерплейта.
 В отличие от тяжелых фреймворков (типа Gin или Fiber), chi полностью совместим
 со стандартной библиотекой net/http. Для Hydro это критически важно по трем причинам:
-
 1. Производительность стриминга: chi не создает лишних аллокаций на куче при парсинге роутов,
 что крайне важно для передачи тяжелого видео-трафика и минимизации задержек.
-
 2. Контексты (Context-friendly): Он идеально работает с context.Context, который уже внедрен
 в наши репозитории и провайдеры для управления жизненным циклом запроса.
-
 3. Middleware: У chi лучший механизм цепочек middleware (логирование, авторизация, RealIP),
 который не ломает стандартные хендлеры Go и позволяет легко масштабировать функционал.
 */
@@ -30,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
+	"github.com/xela07ax/universal-backend-streaming/internal/ingest"
 	"github.com/xela07ax/universal-backend-streaming/internal/repository"
 	"github.com/xela07ax/universal-backend-streaming/internal/streaming"
 	"go.uber.org/zap"
@@ -76,7 +73,7 @@ func (s *Server) Start(addr string) error {
 	}
 
 	s.httpServer = &http.Server{
-		Addr:    addr,
+		Addr:    "0.0.0.0:8080",
 		Handler: s.router,
 		// Важно ставить таймауты, чтобы сокеты не висели вечно (зомби-процесс)
 		ReadTimeout:  30 * time.Minute, // Даем время на загрузку тяжелых видео
@@ -100,51 +97,66 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) setupRoutes() {
-	// 1. Глобальные Middleware (Observed & Safe)
+	// 0. Инициализация движков
+	rtc, err := ingest.NewRTCEngine(s.logger)
+	if err != nil {
+		s.logger.Fatal("Failed to initialize Pion RTC Engine", zap.Error(err))
+	}
+	sm := ingest.NewSessionManager(s.logger)
+
+	// 1. Глобальные Middleware
 	s.router.Use(middleware.RequestID)
 	s.router.Use(middleware.RealIP)
 	s.router.Use(ZapLogger(s.logger))
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(s.setupCORS().Handler)
 
-	// --- 2. API РОУТЫ ---
+	// 1.1. РАЗДАЧА ВИДЕО (из корня проекта)
+	// Запрос: /api/v1/storage/123.mp4 -> Файл: ./uploads/123.mp4
+	videoStorage := http.Dir("./uploads")
+	s.router.Handle("/api/v1/storage/*", http.StripPrefix("/api/v1/storage/", http.FileServer(videoStorage)))
+
+	// 2. API РОУТЫ
 	s.router.Route("/api/v1", func(r chi.Router) {
-		// --- Публичная зона (просмотр видео) ---
+
+		// --- ПУБЛИЧНАЯ ЗОНА ---
 		r.Group(func(r chi.Router) {
-			r.Get("/docs", s.handleGetDocs) // Публичная документация
-			r.Get("/video/{id}", s.handleGetVideoURL)
 			r.Get("/health", s.handleHealth)
 			r.Post("/login", s.handleLogin)
 			r.Post("/refresh", s.handleRefresh)
 
+			// Видео и Стриминг
+			r.Get("/video/{id}", s.handleGetVideoURL)
+			r.Get("/streams", rtc.HandleListStreams(sm, s.logger))
+			r.Post("/whep", rtc.HandleWHEP(sm, s.logger))
 		})
 
-		// --- Приватная зона (Админ панель) ---
+		// --- ЗОНА ПОЛЬЗОВАТЕЛЯ (JWT) ---
 		r.Group(func(r chi.Router) {
-			r.Use(s.AuthMiddleware) // Защищаем всю группу
-			r.Post("/admin/upload", s.handleAdminUploadAsset)
-			r.Get("/admin/assets", s.handleAdminListAssets)
-			r.Post("/admin/assets", s.handleAdminCreateAsset)
+			r.Use(s.AuthMiddleware)
+			r.Get("/assets", s.handleAdminListAssets)
 			r.Post("/logout", s.handleLogout)
+		})
+
+		// --- ЗОНА КРЕАТОРОВ (JWT + Role) ---
+		r.Group(func(r chi.Router) {
+			r.Use(s.AuthMiddleware)
+			r.Use(s.RoleMiddleware("streamer", "admin"))
+
+			r.Post("/whip", rtc.HandleWHIP(sm, s.logger))
+			r.Post("/upload", s.handleAdminUploadAsset)
 		})
 	})
 
-	// 3. Раздача статических файлов фронтенда из папки web/dist
+	// 3. ФРОНТЕНД (SPA)
 	staticPath := "./web/dist"
-
-	s.router.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-		// 1. Формируем ПОЛНЫЙ путь к файлу на диске
-		// filepath.FromSlash гарантирует правильные слеши на Windows (\) и Linux (/)
+	s.router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		// Стандартная логика для SPA index.html
 		path := filepath.Join(staticPath, filepath.Clean(r.URL.Path))
-
-		// 2. Проверяем, существует ли такой файл физически
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			http.ServeFile(w, r, path)
 			return
 		}
-
-		// 3. Если это не файл (а роут Vue, например /admin/dashboard),
-		// отдаем index.html для работы SPA History Mode
 		http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
 	})
 }
@@ -175,11 +187,15 @@ func (s *Server) setupCORS() *cors.Cors {
 	allowedOrigins = uniqueStrings(allowedOrigins)
 
 	return cors.New(cors.Options{
-		AllowedOrigins: allowedOrigins, // Используем динамический список из YAML
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		// Для видео-стриминга обязательно прокидываем заголовки диапазонов
-		ExposedHeaders:   []string{"Link", "Content-Range", "Accept-Ranges", "Content-Length"},
+		//AllowedOrigins: allowedOrigins, // Используем динамический список из YAML
+		AllowedOrigins: []string{"*"},
+		// ВАЖНО: Разрешаем запросы БЕЗ заголовка Origin (актуально для OBS/Whip)
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			return true
+		},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Range"},
+		ExposedHeaders:   []string{"Link", "Content-Length", "Content-Range", "Accept-Ranges"},
 		AllowCredentials: true,
 		MaxAge:           300,
 		Debug:            viper.GetBool("server.debug"),

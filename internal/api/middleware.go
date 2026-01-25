@@ -10,20 +10,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/spf13/viper"
+	"github.com/xela07ax/universal-backend-streaming/internal/types"
 	"go.uber.org/zap"
 )
-
-// 0. Определяем тип для ключа контекста (защита от коллизий)
-type contextKey string
-
-const (
-	userIDKey   contextKey = "user_id"
-	userRoleKey contextKey = "user_role" // Новый ключ
-)
-
-// Если написать context.WithValue(ctx, "user_id", userID), то любая библиотека,
-// которую вы подключите в будущем, может сделать так же. Это приведет к трудноотловимым багам.
-// Собственный тип contextKey гарантирует, что только ваш код сможет обратиться к этому значению.
 
 // AuthMiddleware middleware для защиты админских эндпоинтов
 func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
@@ -93,14 +82,33 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 6. Передаем ID через типизированный контекст
-		ctx := context.WithValue(r.Context(), userIDKey, userID)
-		ctx = context.WithValue(ctx, userRoleKey, role)
+		ctx := context.WithValue(r.Context(), types.UserIDKey, userID)
+		ctx = context.WithValue(ctx, types.UserRoleKey, role)
 
 		// Лог успешного входа (опционально для дебага)
 		s.logger.Debug("👤 Authenticated", zap.String("uid", userID.String()))
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) RoleMiddleware(allowedRoles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Достаем роль, которую положил AuthMiddleware
+			userRole, _ := r.Context().Value(types.UserRoleKey).(string)
+
+			for _, role := range allowedRoles {
+				if userRole == role {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			s.logger.Warn("🚫 Role access denied", zap.String("role", userRole))
+			s.respondError(w, http.StatusForbidden, "У вас недостаточно прав")
+		})
+	}
 }
 
 // ZapLogger внедряет Uber Zap в цепочку chi.

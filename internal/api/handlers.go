@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/viper"
 	"github.com/xela07ax/universal-backend-streaming/internal/repository"
+	"github.com/xela07ax/universal-backend-streaming/internal/types"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -23,45 +24,34 @@ func (s *Server) handleGetVideoURL(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		http.Error(w, "invalid uuid", http.StatusBadRequest)
+		s.respondError(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
 
-	// 1. Ищем в БД через репозиторий
 	asset, err := s.media.GetAssetByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "video not found", http.StatusNotFound)
+		s.respondError(w, http.StatusNotFound, "Video not found")
 		return
 	}
 
-	// 2. Генерируем URL через наш VideoProvider
-	// Это главная фишка нашего бойлерплейта
 	streamingURL := s.video.BuildURL(asset.StoragePath)
 
-	// 3. Отдаем ответ
-	w.Header().Set("Content-Type", "application/json")
-	err = json.NewEncoder(w).Encode(map[string]string{
-		"id":    asset.ID.String(),
-		"title": asset.Title,
+	// ВАЖНО: структура ответа должна совпадать с тем, что ищет фронтенд
+	s.respond(w, http.StatusOK, map[string]string{
 		"url":   streamingURL,
+		"title": asset.Title,
 	})
-
-	if err != nil {
-		// Используем логгер сервера, чтобы зафиксировать проблему с отправкой ответа
-		s.logger.Error("failed to encode upload response", zap.Error(err))
-	}
 }
 
 // handleAdminUploadAsset принимает видеофайл и метаданные
 func (s *Server) handleAdminUploadAsset(w http.ResponseWriter, r *http.Request) {
 	// 1. Извлекаем данные из контекста (ID и Роль)
-	valID := r.Context().Value(userIDKey)
-	userID, ok := valID.(uuid.UUID)
+	userID, ok := types.GetUserID(r.Context())
 	if !ok {
 		s.respondError(w, http.StatusUnauthorized, "Не удалось идентифицировать пользователя")
 		return
 	}
-	role, _ := r.Context().Value(userRoleKey).(string)
+	role := types.GetUserRole(r.Context())
 	// ПРОВЕРКА РОЛИ: только admin может продолжать
 	if role != "admin" {
 		s.logger.Warn("🚫 Unauthorized upload attempt",

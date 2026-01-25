@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/xela07ax/universal-backend-streaming/internal/discovery"
-	"github.com/xela07ax/universal-backend-streaming/internal/providers" // Пакет с вашей функцией ComparableUrl
 	"go.uber.org/zap"
 )
 
@@ -75,9 +74,11 @@ func NewVideoProvider(sd discovery.ServiceDiscovery, logger *zap.Logger) (*Video
 
 // BuildURL генерирует полный URL для указанного роута, используя
 // закешированное базовое состояние хоста.
-func (p *VideoProvider) BuildURL(route string) string {
-	// Используем базовое состояние объекта (p.baseHost) для генерации
-	return providers.ComparableUrl(p.basePath, route, "", nil)
+func (p *VideoProvider) BuildURL(storagePath string) string {
+	// Превращаем "uploads/my_video.mp4" -> "/api/v1/storage/my_video.mp4"
+	// Мы убираем префикс папки "uploads/", так как роут в Chi уже указывает на неё
+	cleanPath := strings.TrimPrefix(storagePath, "uploads/")
+	return "/api/v1/storage/" + cleanPath
 }
 
 // GetBasePath возвращает текущий путь к хранилищу видео

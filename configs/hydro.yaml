@@ -10,12 +10,17 @@ server:
     # Список внешних хостов (например, ваш IP в сети)
     allowed_origins:
       - "http://192.168.72.16:5173"
+      - "http://localhost:5173"
+      - "https://*"
+      - "http://*"
+      - "http://192.168.72.16:8080"
+      - "*"
   debug: false
 
 # Настройки безопасности
 auth:
   jwt_secret: "hydro-super-secret-key-2026-change-me"
-  access_token_ttl: "15m"   # Короткоживущий токен для запросов
+  access_token_ttl: "150m"   # Короткоживущий токен для запросов
   refresh_token_ttl: "168h" # 7 дней для сессии в Redis
   secure_cookie: false # Иначе на http://localhost кука может не приниматься браузером
 # Настройки базы данных PostgreSQL
@@ -45,7 +50,12 @@ video:
   host: "localhost"
   port: 8080
   # ПУТЬ К ПАПКЕ С ВИДЕО (Обязательно для работы Upload и Streaming)
-  storage_path: "./web/dist/uploads"
+  storage_path: "./uploads"
+ingest:
+  whip_enabled: true
+  udp_mux_port: 50000
+  tcp_mux_port: 3478
+  ice_lite: true # Упрощает прохождение NAT, если у сервера белый IP
 
 # Service Discovery (ConfigResolver)
 # Настройки Service Discovery (только для Production)

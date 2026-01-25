@@ -8,10 +8,12 @@ web/yarn-debug.log*
 web/yarn-error.log*
 web/.vscode/
 node_modules/
+# Media storage (dynamic content)
+uploads/
+uploads/**/*
 
 # --- Backend (Go) ---
 bin/
-uploads/
 hydro-engine
 app-streaming
 *.exe
