@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # 1. SERVICE DISCOVERY (Consul с ACL)
+  consul:
+    image: hashicorp/consul:1.15
+    container_name: hydro-consul
+    restart: always
+    ports:
+      - "8500:8500"
+      - "8600:8600/tcp"
+      - "8600:8600/udp"
+    environment:
+      CONSUL_LOCAL_CONFIG: |
+        {
+          "primary_datacenter": "dc1",
+          "acl": {
+            "enabled": true,
+            "default_policy": "deny",
+            "tokens": {
+              "initial_management": "hydro-admin-token-2026"
+            }
+          }
+        }
+    command: "agent -dev -client=0.0.0.0 -advertise=127.0.0.1"
+    networks:
+      - hydro-net
+
+  # 2. SESSION STORE (Redis с паролем)
+  redis:
+    image: redis:7-alpine
+    container_name: hydro-redis
+    restart: always
+    command: redis-server --requirepass "hydro-pass-2026"
+    networks:
+      - hydro-net
+
+  # 3. HYDRO ENGINE APP (Backend + Frontend)
+  hydro-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hydro-app
+    restart: always
+    depends_on:
+      - consul
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      - ENV=production
+      - HYDRO_CONFIG=configs/production.yaml
+    volumes:
+      - ./configs:/app/configs:ro      # Конфиги только для чтения
+      - ./storage:/app/web/dist/uploads # Внешнее хранилище для видео
+    networks:
+      - hydro-net
+    # Healthcheck для мониторинга состояния извне
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  hydro-net:
+    driver: bridge

@@ -1,0 +1,39 @@
+[Unit]
+Description=Hydro Engine Streaming Service
+# Ждем поднятия сети
+After=network.target consul.service redis.service
+StartLimitIntervalSec=0
+
+[Service]
+# Запуск от не-привилегированного пользователя
+Type=simple
+User=hydro_user
+Group=hydro_user
+
+# Путь к папке проекта
+WorkingDirectory=/opt/hydro
+
+# Команда запуска с указанием конфига
+# Используем бинарник из bin, который мы собрали через Makefile
+ExecStart=/opt/hydro/bin/hydro serve --config /opt/hydro/configs/production.yaml
+
+# Настройки Graceful Shutdown
+# SIGTERM инициирует нашу логику закрытия БД и Redis
+KillSignal=SIGTERM
+KillMode=process
+TimeoutStopSec=20s
+
+# Авторестарт при падении
+Restart=always
+RestartSec=5s
+
+# Переменные окружения
+Environment=HYDRO_ENV=production
+Environment=GOMAXPROCS=auto
+
+# Ограничения ресурсов (защита сервера)
+MemoryMax=2G
+CPUWeight=100
+
+[Install]
+WantedBy=multi-user.target

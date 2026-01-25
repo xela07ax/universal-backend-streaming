@@ -1,0 +1,32 @@
+# --- Frontend (Vue/Vite) ---
+web/node_modules/
+web/dist/
+web/.env.local
+web/.env.*.local
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
+web/.vscode/
+node_modules/
+
+# --- Backend (Go) ---
+bin/
+uploads/
+hydro-engine
+app-streaming
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.go/
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# --- Configs & Local Data ---
+configs/config.local.yaml
+.env

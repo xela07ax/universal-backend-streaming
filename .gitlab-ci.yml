@@ -1,0 +1,104 @@
+# Использование Docker-in-Docker для сборки образов
+image: docker:24.0.5
+
+services:
+  - docker:24.0.5-dind
+
+variables:
+  GO_VERSION: "1.25.5"
+  DOCKER_DRIVER: overlay2
+  CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+
+stages:
+  - quality    # Проверка кода (Lint/Test)
+  - build      # Сборка Docker-образа
+  - security   # Сканирование образа на уязвимости
+  - deploy     # Деплой в Staging/Production
+
+# --- STAGE: QUALITY ---
+
+lint-backend:
+  stage: quality
+  image: golangci/golangci-lint:v1.60-alpine # Актуальный линтер 2026
+  script:
+    - golangci-lint run ./...
+  only:
+    - merge_requests
+    - main
+
+test-backend:
+  stage: quality
+  image: golang:1.25.5-alpine
+  script:
+    - go test -v -race ./...
+  artifacts:
+    reports:
+      junit: report.xml
+
+lint-frontend:
+  stage: quality
+  image: node:20-alpine
+  script:
+    - cd web
+    - npm install
+    - npm run lint
+  only:
+    - merge_requests
+
+# --- STAGE: BUILD ---
+
+build-app:
+  stage: build
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build
+      --build-arg GO_VERSION=$GO_VERSION
+      --cache-from $CONTAINER_RELEASE_IMAGE
+      -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
+  only:
+    - main
+    - tags
+
+# --- STAGE: SECURITY ---
+
+scan-image:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy image --exit-code 0 --severity HIGH,CRITICAL $CONTAINER_TEST_IMAGE
+    - trivy image --exit-code 1 --severity CRITICAL $CONTAINER_TEST_IMAGE
+  allow_failure: true
+
+# --- STAGE: DEPLOY ---
+
+deploy-production:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    # Обновление контейнера на удаленном сервере
+    - ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "
+      docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
+      docker pull $CONTAINER_TEST_IMAGE &&
+      docker stop hydro-app || true &&
+      docker rm hydro-app || true &&
+      docker run -d --name hydro-app
+      --network hydro-net
+      -p 8080:8080
+      -v /opt/hydro/configs:/app/configs
+      -v /opt/hydro/storage:/app/storage
+      $CONTAINER_TEST_IMAGE"
+  environment:
+    name: production
+    url: http://your-domain.com
+  when: manual # Ручной деплой для безопасности
+  only:
+    - main

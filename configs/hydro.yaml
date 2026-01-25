@@ -1,0 +1,55 @@
+# Hydro Engine Configuration (2026)
+env: "development"
+
+# Настройки сервера (на чем слушаем входящие запросы)
+server:
+  port: "8080"
+  cors:
+    # Если true — автоматически добавит localhost и 127.0.0.1 с текущим портом
+    allow_local: true
+    # Список внешних хостов (например, ваш IP в сети)
+    allowed_origins:
+      - "http://192.168.72.16:5173"
+  debug: false
+
+# Настройки безопасности
+auth:
+  jwt_secret: "hydro-super-secret-key-2026-change-me"
+  access_token_ttl: "15m"   # Короткоживущий токен для запросов
+  refresh_token_ttl: "168h" # 7 дней для сессии в Redis
+  secure_cookie: false # Иначе на http://localhost кука может не приниматься браузером
+# Настройки базы данных PostgreSQL
+database:
+  service_name: "db-service" # ЛОГИЧЕСКОЕ ИМЯ (не меняется) для резолвера
+  host: "192.168.72.37"      # ФИЗИЧЕСКИЙ АДРЕС (для режима Local)
+  name: "streaming_db"
+  user: "hydro_user"
+  password: "hydro_pass"
+  port: 5432
+  sslmode: "disable"
+  # Параметры пула для High-Load
+  max_conns: 25
+  min_conns: 5
+  max_conn_lifetime: "30m"
+  debug: false
+# Redis для хранения сессий
+redis:
+  service_name: "redis-service"
+  host: "192.168.72.37" # Изменится на "redis", если запуск в Docker
+  port: 6379
+  password: "your-strong-hydro-password-2026"
+  db: 0
+# Настройки видео-сервиса
+video:
+  service_name: "video-service" # Имя для резолвера
+  host: "localhost"
+  port: 8080
+  # ПУТЬ К ПАПКЕ С ВИДЕО (Обязательно для работы Upload и Streaming)
+  storage_path: "./web/dist/uploads"
+
+# Service Discovery (ConfigResolver)
+# Настройки Service Discovery (только для Production)
+discovery:
+  enabled: true # Если true — игнорируем блоки выше и идем в Consul
+  consul_addr: "192.168.72.37:8500"
+  consul_token: "hydro-admin-token-2026"

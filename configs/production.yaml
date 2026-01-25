@@ -1,0 +1,37 @@
+# Режим промышленной эксплуатации
+env: "production"
+
+server:
+  port: "8080"
+
+# Безопасность: СТРОГО HTTPS и сильные секреты
+auth:
+  jwt_secret: "PROD-SECRET-GENERATED-AT-DEPLOY-2026"
+  access_token_ttl: "15m"
+  refresh_token_ttl: "168h"
+  secure_cookie: true  # Куки не будут работать без HTTPS!
+
+# Параметры БД (адреса придут из Discovery)
+database:
+  service_name: "db-service"
+  user: "hydro_user"
+  password: "hydro_pass_strong"
+  name: "streaming_db"
+  sslmode: "verify-full"
+
+# Параметры Redis
+redis:
+  service_name: "redis-service"
+  password: "strong-redis-pass-2026"
+  db: 0
+
+# Контент
+video:
+  service_name: "video-service"
+  storage_path: "/app/storage/uploads" # Путь внутри контейнера
+
+# ВКЛЮЧАЕМ SERVICE DISCOVERY
+discovery:
+  enabled: true
+  consul_addr: "consul:8500" # Внутри сети Docker
+  consul_token: "hydro-admin-token-2026"

@@ -1,0 +1,42 @@
+# Режим разработки
+env: "development"
+
+server:
+  port: "8080"
+
+# Безопасность: в деве разрешаем HTTP (без SSL)
+auth:
+  jwt_secret: "dev-hydro-secret-2026-very-long-string"
+  access_token_ttl: "15m"
+  refresh_token_ttl: "168h"
+  secure_cookie: false  # Позволяет работать без HTTPS на localhost
+
+# Прямое подключение к сетевой базе и локальному редису
+database:
+  service_name: "db-service"
+  host: "192.168.72.37"
+  port: 5432
+  user: "hydro_user"
+  password: "hydro_pass"
+  name: "streaming_db"
+  sslmode: "disable"
+
+redis:
+  service_name: "redis-service"
+  host: "localhost"
+  port: 6379
+  password: "hydro-pass-2026"
+  db: 0
+
+# Контент
+video:
+  service_name: "video-service"
+  host: "localhost"
+  port: 8080
+  storage_path: "./web/dist/uploads"
+
+# Отключаем Consul для быстрой локальной работы
+discovery:
+  enabled: false
+  consul_addr: "localhost:8500"
+  consul_token: ""
